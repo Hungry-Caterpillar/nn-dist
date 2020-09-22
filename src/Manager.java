@@ -19,6 +19,8 @@ import java.sql.Statement;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.sql.ResultSet;
+import java.util.zip.Adler32;
+import java.util.zip.Checksum;
 
 /** Database manager
  */
@@ -156,11 +158,14 @@ class DatabaseManager {
 public class Manager {
     public static DatabaseManager dbm;
     public static final String server_address = "scorpiozero.ddns.net";
+    public static final int version = 9;
+    public static final int min_version = 9;
     public static ServerSocket server;
     public static int server_port;
     public static boolean isServer;
     public static String network_uff;
-    public static String network_pb;
+    public static String network_uff_url;
+    public static long net_checksum = 0;
     public static String[] parameters;
     
     public static List<Manager> allManagers;
@@ -217,7 +222,9 @@ public class Manager {
             } else {
                 Install(server_address + " " + server_port + "=tcp");
             }
-        } catch(Exception e) {}
+        } catch(Exception e) {
+            System.out.println("InstallEngines: " + e.getMessage());
+        }
     }
     static void WriteEngines(String user, String pass) {
         try {
@@ -230,7 +237,9 @@ public class Manager {
                 writer.write(str);
                 writer.close();
             }
-        } catch(Exception e) {}
+        } catch(Exception e) {
+            System.out.println("WriteEngines: " + e.getMessage());
+        }
     }
     public void printDebug(String str,int id) {
         if(isVerbose)
@@ -240,6 +249,18 @@ public class Manager {
         System.out.println(str);
     }
     public void onStart() {
+    }
+    public static long computeChecksum(String uff) {
+        try {
+            File net_uff = new File(uff);
+            byte[] content = Files.readAllBytes(Paths.get(uff));
+            Checksum checksum = new Adler32();
+            checksum.update(content, 0, content.length);
+            return checksum.getValue();
+        } catch (Exception e) {
+            System.out.println("computeCheckusm: " + e.getMessage());
+            return 0;
+        }
     }
     public static void startServer() {
         if(isServer)
@@ -252,7 +273,7 @@ public class Manager {
         try {
             server = new ServerSocket(server_port);
         } catch (Exception e) {
-            m1.printDebug(e.getMessage(),0);
+            m1.printDebug("startServer: " + e.getMessage(),0);
         }
         
         Runnable r = new Runnable() {
@@ -262,20 +283,14 @@ public class Manager {
                     while(isServer) {
                         Socket skt = server.accept();
                         m1.printDebug(skt.toString(),0);       
-                        String cmd = skt.getInetAddress().toString() + " " + skt.getPort();
+                        String cmd = skt.getInetAddress().getHostAddress() + " " + skt.getPort();
                         Engine eng = new TcpServerEngine(cmd,skt);
                         eng.myManager = m1;
                         ObserverEngines.add(eng);
                         ObserverEngines.get(ObserverEngines.size() - 1).start();
-                        while(!eng.isDone())
-                            ;
-                        if(!eng.hasFailed()) {
-                            m1.addLastObserver();
-                            Observe(eng,m1.workID);
-                        }
                     }
                 } catch (Exception e) {
-                    m1.printDebug(e.getMessage(),0);
+                    m1.printDebug("startServer: " + e.getMessage(),0);
                 }
             }
         };
@@ -291,79 +306,59 @@ public class Manager {
             m1.printDebug("Stopping server : " + server,0);
             server.close();
         } catch (Exception e) {
-            m1.printDebug(e.getMessage(),0);
+            m1.printDebug("stopServer: " + e.getMessage(),0);
         }
     }
     static String getWho() {
-        String str = "<who>\n";
+        String str = "\n============== " + ObserverEngines.size() +
+             " clients connected  ===============\n";
+        int i = 1;
         for(Engine e: ObserverEngines) {
-            int index = e.name.indexOf('@');
-            str += e.name.substring(0,index);
-            str += "\n";
+            str += i + ". " + e.name + "\n";
+            i++;
         }
-        str += "</who>";
+        str += "===================================================\n";
         return str;
     }
-    static String getAllObservers() {
-        String str = "<workers>\n\r";
-        for(Manager m: allManagers) {
-            str += "<Work> " + m.workID + "\n";
-            for(Engine e: m.WorkObservers) {
-                int index = e.name.indexOf('@');
-                str += e.name.substring(0,index);
-                str += "\n";
+    static void killObserver(int engine_id) {
+        int i = 1;
+        for(Engine e: ObserverEngines) {
+            if(engine_id == 0 || i == engine_id) {
+                try {
+                    e.myManager.printDebug("Sending kill signal to engine " + engine_id, 0);
+                    e.send("kill");
+                } catch (Exception ex) {
+                    System.out.println("Error sending kill signal!");
+                }
+                if(engine_id != 0)
+                    break;
             }
-            str += "</Work>\n";
+            i++;
         }
-        str += "</workers>";
+    }
+    static String getAllObservers() {
+        String str = "\n=============== " + allManagers.size() + " active trainings ================\n";
+        for(Manager m: allManagers) {
+            str += "======= " + m.WorkObservers.size() + 
+               " clients working on training run " + m.workID + " =======\n";
+            int i = 1;
+            for(Engine e: m.WorkObservers) {
+                str += i + ". " + e.name + "\n";
+                i++;
+            }
+            str += "===================================================\n";
+        }
+        str += "===================================================\n";
         return str;
     }
     public void addLastObserver() {
     }
     public void removeObserver(Engine e) {
     }
-    static void SendNetwork(Engine e) {
-        String message = "";
-        try {
-            byte[] content;
-            
-            //uff
-            File net_uff = new File(network_uff);
-            if(net_uff.exists())
-                content = Files.readAllBytes(Paths.get(network_uff));
-            else
-                content = new byte[1];
-            
-            message = "<network-uff>\n";
-            message += content.length;
-            e.send(message);
-            
-            e.sendFile(content);
-            
-            message = "</network-uff>";
-            e.send(message);
-            
-            //pb
-            /*
-            content = Files.readAllBytes(Paths.get(network_pb));
-            
-            message = "<network-pb>\n";
-            message += content.length;
-            e.send(message);
-            
-            e.sendFile(content);
-            
-            message = "</network-pb>";
-            e.send(message);
-            */
-        } catch (Exception ex) {
-            System.out.println("Error sending networks: " + ex.getMessage());
-        }
-    }
     static void SendParameters(Engine e) {
         String message = "";
         try {
-            message = "<parameters> ";
+            message = "<parameters>\n";
             for(int i = 0; i < parameters.length; i++)
                 message += parameters[i] + " ";
             message += "\n</parameters>";
@@ -372,12 +367,36 @@ public class Manager {
             System.out.println("Error sending parameters: " + ex.getMessage());
         }
     }
+    static void SendChecksum(Engine e) {
+        String message = "";
+        try {
+            message = "<checksum>\n";
+            message += net_checksum + "\n";
+            message += network_uff_url + "\n";
+            message += "</checksum>";
+            e.send(message);
+        } catch (Exception ex) {
+            System.out.println("Error sending checksum: " + ex.getMessage());
+        }
+    }
+    static void SendVersion(Engine e) {
+        String message = "";
+        try {
+            message = "<version>\n";
+            message += version + "\n";
+            message += min_version + "\n";
+            message += "</version>";
+            e.send(message);
+        } catch (Exception ex) {
+            System.out.println("Error sending version: " + ex.getMessage());
+        }
+    }
     static void SendNetworkAll(int ID) {
+        net_checksum = computeChecksum(network_uff);
         for(Manager m: allManagers) {
             if(m.workID == ID) {
                 for(Engine e: m.WorkObservers) {
-                    SendParameters(e);
-                    SendNetwork(e);
+                    SendChecksum(e);
                 }
             }
         }
@@ -386,9 +405,9 @@ public class Manager {
         for(Manager m: allManagers) {
             if(m.workID == ID) {
                 m.WorkObservers.add(e);
-                m.printDebug("Sending network",0);
+                SendVersion(e);
                 SendParameters(e);
-                SendNetwork(e);
+                SendChecksum(e);
             }
         }
     }
@@ -399,6 +418,7 @@ public class Manager {
                 m.WorkObservers.remove(e);
             }
             ObserverEngines.remove(e);
+            e.kill();
         }
     }
     public void LoadEngine(Engine e2) {
@@ -422,6 +442,11 @@ public class Manager {
                 LoadEngine(InstalledEngines.get(0));
             } else if(Engine.isSame(cmd,"-port")) {
                 server_port = Integer.parseInt(args[count++]);
+            } else if(Engine.isSame(cmd,"-kill")) {
+                int id = Integer.parseInt(args[count++]);
+                Manager.killObserver(id);
+            } else if(Engine.isSame(cmd,"-killall")) {
+                Manager.killObserver(0);
             } else if(Engine.isSame(cmd,"-debug")) {
                 isVerbose = !isVerbose;
                 if(isVerbose) printDebug("debugging on",0);
@@ -432,29 +457,37 @@ public class Manager {
                 printInfo(Manager.getAllObservers());
             } else if(Engine.isSame(cmd,"-network-uff")) {
                 network_uff = args[count++];
-            } else if(Engine.isSame(cmd,"-network-pb")) {
-                network_pb = args[count++];
+                network_uff_url = args[count++];
             } else if(Engine.isSame(cmd,"-parameters")) {
                 workID = Integer.parseInt(args[count++].trim());
-                parameters = new String[5];
-                for(int i = 0; i < 5; i++)
+                parameters = new String[args.length - 2];
+                for(int i = 0; i < parameters.length; i++)
                     parameters[i] = args[count++];
 
                 try {
                     dbm.checkWork(workID,parameters);
                 } catch (SQLException e) {
-                    printDebug(e.getMessage(),0);
+                    printDebug("Database update parametters: " + e.getMessage(),0);
                 }
             } else if(Engine.isSame(cmd,"-update-network")) {
                 SendNetworkAll(workID);
             } else if(Engine.isSame(cmd,"-help")) {
                 String msg = "-startServer | start server\n" +
                              "-stopServer | stop server\n" +
+                             "-startClient | start client\n" +
                              "-port | set port for the server\n" +
+                             "-kill | kill client with id\n" +
+                             "-killall | kill all clients\n" +
+                             "-debug | turn on debugging\n" +
+                             "-who | list connected clients\n" +
+                             "-workers | list connected clients working on each net\n" +
+                             "-parameters | network training parameters\n" +
+                             "-network-uff | location of the uff net followed by its http address\n" +
+                             "-update-network | update all clients with a new network\n" +
                              "-help | display this usage message." +
                              "\n\tUse '-<command>' when invoking from command line!" +
                              "\n\tUse '<command>' without hyphen once application started.\n";
-                printDebug(msg,0);
+                printInfo(msg);
             }
         }
     }   

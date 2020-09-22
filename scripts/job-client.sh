@@ -6,11 +6,7 @@ set -e
 SC=./Scorpio/bin/Linux         # workding directory of engine
 EXE=scorpio.sh                 # engine executable
 G=512                          # games per worker
-SV=$1                          # mcts simulations
-CPUCT=$2                       # Cpuct constant
-POL_TEMP=$3                    # Policy temeprature
-NOISE_FRAC=$4                  # Fraction of Dirchilet noise
-HEAD_TYPE=$5                   # NN heads
+SCOPT="$@"                     # all options
 
 #launch multiple jobs with mpi
 RANKS=1
@@ -34,10 +30,7 @@ fi
 
 #run selfplay
 rungames() {
-    SCOPT="train_data_type ${HEAD_TYPE} alphabeta_man_c 0 min_policy_value 0 \
-           reuse_tree 0 fpu_is_loss 0 fpu_red 0 cpuct_init ${CPUCT} \
-           backup_type 6 policy_temp ${POL_TEMP} noise_frac ${NOISE_FRAC}"
-    ALLOPT="nn_type 0 nn_path ${NDIR} new ${SCOPT} sv ${SV} \
+    ALLOPT="nn_type 0 nn_path ${NDIR} new ${SCOPT} \
 	   pvstyle 1 selfplayp ${G} games.pgn train.epd quit"
     time ${MPICMD} ./${EXE} ${ALLOPT}
 }
