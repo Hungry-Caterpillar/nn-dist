@@ -7,14 +7,14 @@ SC=./Scorpio/bin/Linux         # workding directory of engine
 EXE=scorpio.sh                 # engine executable
 G=512                          # games per worker
 SCOPT="$@"                     # all options
-
+echo $SCOPT
 #launch multiple jobs with mpi
-RANKS=1
-if [ $RANKS -gt 1 ]; then
-   MPICMD="mpirun -np ${RANKS}"
-else
-   MPICMD=
-fi
+#RANKS=1
+#if [ $RANKS -gt 1 ]; then
+#   MPICMD="mpirun -np ${RANKS}"
+#else
+#   MPICMD=
+#fi
 
 #check if Scorpio directory exists
 if [ ! -f ${SC}/${EXE} ]; then
@@ -22,17 +22,18 @@ if [ ! -f ${SC}/${EXE} ]; then
 fi
 
 #number of cpus and gpus
-if [ ! -z `which nvidia-smi` ]; then
-    NDIR=$PWD/net.uff
-else
-    NDIR=$PWD/net.pb
-fi
+#if [ ! -z `which nvidia-smi` ]; then
+NDIR=$PWD/net.uff
+#else
+#    NDIR=$PWD/net.pb
+#fi
 
 #run selfplay
 rungames() {
+    echo "rungames()"
     ALLOPT="nn_type 0 nn_path ${NDIR} new ${SCOPT} \
 	   pvstyle 1 selfplayp ${G} games.pgn train.epd quit"
-    time ${MPICMD} ./${EXE} ${ALLOPT}
+    time ./${EXE} ${ALLOPT}
 }
 
 #get selfplay games
