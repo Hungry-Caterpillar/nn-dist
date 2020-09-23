@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -x
 
 #setup parameters for selfplay
 SC=./Scorpio/bin/Linux         # workding directory of engine
